@@ -83,6 +83,13 @@
       "cacheVariables": {
         "OLLAMA_RUNNER_DIR": "vulkan"
       }
+    },
+    {
+      "name": "MoltenVK",
+      "inherits": [ "Vulkan" ],
+      "cacheVariables": {
+        "OLLAMA_FETCH_MOLTENVK": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -140,6 +147,11 @@
       "name": "Vulkan",
       "targets": [ "ggml-vulkan" ],
       "configurePreset": "Vulkan"
+    },
+    {
+      "name": "MoltenVK",
+      "targets": [ "ggml-vulkan" ],
+      "configurePreset": "MoltenVK"
     }
   ]
 }
