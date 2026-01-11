@@ -169,6 +169,9 @@ type Settings struct {
 
 	// SidebarOpen indicates if the chat sidebar is open
 	SidebarOpen bool
+
+	// AutoUpdate indicates if automatic updates are enabled (defaults to true)
+	AutoUpdate bool
 }
 
 type Store struct {

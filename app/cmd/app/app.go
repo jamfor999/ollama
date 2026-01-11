@@ -40,9 +40,21 @@ var (
 var debug = strings.EqualFold(os.Getenv("OLLAMA_DEBUG"), "true") || os.Getenv("OLLAMA_DEBUG") == "1"
 
 var (
-	fastStartup = false
-	devMode     = false
+	fastStartup       = false
+	devMode           = false
+	autoUpdateEnabled = true // computed at startup, used by startHiddenTasks
 )
+
+// isAutoUpdateEnvSet returns whether the OLLAMA_ENABLE_AUTO_UPDATE env var is set,
+// and if so, what its value is. If the env var is set, it takes precedence over
+// the UI setting. If unset, the UI setting is used.
+func isAutoUpdateEnvSet() (isSet bool, enabled bool) {
+	val := os.Getenv("OLLAMA_ENABLE_AUTO_UPDATE")
+	if val == "" {
+		return false, false // not set, defer to UI setting
+	}
+	return true, strings.EqualFold(val, "true") || val == "1"
+}
 
 type appMove int
 
@@ -284,8 +296,30 @@ func main() {
 		slog.Debug("background desktop server done")
 	}()
 
-	updater := &updater.Updater{Store: st}
-	updater.StartBackgroundUpdaterChecker(ctx, UpdateAvailable)
+	// Check if auto-update is enabled.
+	// If OLLAMA_ENABLE_AUTO_UPDATE env var is set, it takes precedence.
+	// If unset, the UI setting is used.
+	// This sets the package-level autoUpdateEnabled variable which is also
+	// used by startHiddenTasks() to decide whether to apply pending updates.
+	if envSet, envValue := isAutoUpdateEnvSet(); envSet {
+		autoUpdateEnabled = envValue
+		slog.Debug("auto-update controlled by environment variable", "enabled", autoUpdateEnabled)
+	} else {
+		settings, err := st.Settings()
+		if err != nil {
+			slog.Warn("failed to load settings for auto-update check, defaulting to enabled", "error", err)
+			autoUpdateEnabled = true
+		} else {
+			autoUpdateEnabled = settings.AutoUpdate
+		}
+	}
+
+	if autoUpdateEnabled {
+		updater := &updater.Updater{Store: st}
+		updater.StartBackgroundUpdaterChecker(ctx, UpdateAvailable)
+	} else {
+		slog.Info("auto-update is disabled")
+	}
 
 	hasCompletedFirstRun, err := st.HasCompletedFirstRun()
 	if err != nil {
@@ -343,6 +377,11 @@ func startHiddenTasks() {
 	// If an upgrade is ready and we're in hidden mode, perform it at startup.
 	// If we're not in hidden mode, we want to start as fast as possible and not
 	// slow the user down with an upgrade.
+	// The autoUpdateEnabled flag is computed at startup from the env var and UI setting.
+	if !autoUpdateEnabled {
+		slog.Debug("skipping pending update - auto-update is disabled")
+		return
+	}
 	if updater.IsUpdatePending() {
 		if fastStartup {
 			// CLI triggered app startup use-case
