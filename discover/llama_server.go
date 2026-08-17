@@ -179,6 +179,23 @@ var deviceLineRegex = regexp.MustCompile(
 	`^\s+(.+?):\s+(.+?)\s+\((\d+)\s+MiB,\s+(\d+)\s+MiB\s+free\)`,
 )
 
+// trailingDeviceIndex extracts the per-library device index embedded in ggml
+// device names such as "CUDA0" or "Vulkan12".
+func trailingDeviceIndex(name string) (int, bool) {
+	i := len(name)
+	for i > 0 && name[i-1] >= '0' && name[i-1] <= '9' {
+		i--
+	}
+	if i == 0 || i == len(name) {
+		return 0, false
+	}
+	idx, err := strconv.Atoi(name[i:])
+	if err != nil {
+		return 0, false
+	}
+	return idx, true
+}
+
 // cudaCCRegex matches CUDA stderr lines like:
 //
 //	Device 0: NVIDIA GeForce GTX 1060 6GB, compute capability 6.1, VMM: yes, VRAM: 6063 MiB
@@ -268,7 +285,7 @@ func parseLlamaServerDevicesWithNative(output, nativeOutput string, libDirs []st
 
 	// Parse stdout device lines
 	var devices []ml.DeviceInfo
-	deviceIndex := 0
+	libraryDeviceIndex := make(map[string]int)
 	scanner = bufio.NewScanner(strings.NewReader(output))
 	for scanner.Scan() {
 		matches := deviceLineRegex.FindStringSubmatch(scanner.Text())
@@ -287,9 +304,18 @@ func parseLlamaServerDevicesWithNative(output, nativeOutput string, libDirs []st
 		// as inference compute devices or inflate the scheduler's GPU count.
 		if totalMiB == 0 {
 			slog.Debug("skipping pseudo-device with zero memory", "name", name, "description", description)
-			deviceIndex++
 			continue
 		}
+
+		// ggml numbers devices per library (CUDA0, Vulkan1) and skipped
+		// pseudo-devices do not occupy a slot in that numbering, so the index
+		// embedded in the name is authoritative. Fall back to a per-library
+		// counter for unnumbered names (Metal, older llama.cpp device labels).
+		deviceIndex := libraryDeviceIndex[library]
+		if idx, ok := trailingDeviceIndex(name); ok {
+			deviceIndex = idx
+		}
+		libraryDeviceIndex[library] = deviceIndex + 1
 
 		// For CUDA devices, check if this variant supports the device's CC
 		if library == "CUDA" {
@@ -299,7 +325,6 @@ func parseLlamaServerDevicesWithNative(output, nativeOutput string, libDirs []st
 					slog.Info("skipping CUDA device — compute capability not in compiled architectures",
 						"device", description, "cc", cc.arch, "archs", cudaArchs,
 						"libDirs", libDirs)
-					deviceIndex++
 					continue
 				}
 			} else if !ok {
@@ -365,7 +390,6 @@ func parseLlamaServerDevicesWithNative(output, nativeOutput string, libDirs []st
 		}
 
 		devices = append(devices, dev)
-		deviceIndex++
 	}
 
 	return refineLlamaServerDevices(devices, libDirs)

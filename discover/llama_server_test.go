@@ -40,6 +40,7 @@ func TestLlamaServerDiscovery(t *testing.T) {
 	t.Run("parse devices", func(t *testing.T) {
 		type wantDevice struct {
 			name            string
+			id              string
 			library         string
 			totalMiB        uint64
 			compute         string
@@ -133,6 +134,24 @@ Available devices:
 					library:         "Vulkan",
 					totalMiB:        32768,
 					checkIntegrated: true,
+				}},
+			},
+			{
+				// macOS payloads bundle ggml-blas, which reports a BLAS
+				// pseudo-device with zero memory ahead of real GPUs. The
+				// pseudo-device must not shift the Vulkan device index or
+				// GGML_VK_VISIBLE_DEVICES selects a nonexistent device.
+				name: "BLAS pseudo-device does not shift Vulkan index",
+				output: `Available devices:
+  BLAS: Accelerate (0 MiB, 0 MiB free)
+  Vulkan0: AMD Radeon Pro 5300 (4080 MiB, 4080 MiB free)
+`,
+				libDirs: []string{"/lib/ollama", "/lib/ollama/vulkan"},
+				want: []wantDevice{{
+					name:     "Vulkan0",
+					id:       "0",
+					library:  "Vulkan",
+					totalMiB: 4080,
 				}},
 			},
 			{
@@ -249,9 +268,12 @@ Available devices:
 				}
 				for i, want := range tt.want {
 					got := devices[i]
-					if want.name != "" && got.Name != want.name {
-						t.Errorf("device %d name = %q, want %q", i, got.Name, want.name)
-					}
+				if want.name != "" && got.Name != want.name {
+					t.Errorf("device %d name = %q, want %q", i, got.Name, want.name)
+				}
+				if want.id != "" && got.ID != want.id {
+					t.Errorf("device %d id = %q, want %q", i, got.ID, want.id)
+				}
 					if want.library != "" && got.Library != want.library {
 						t.Errorf("device %d library = %q, want %q", i, got.Library, want.library)
 					}
