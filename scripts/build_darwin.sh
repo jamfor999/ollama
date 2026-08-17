@@ -155,7 +155,7 @@ _merge_darwin_payload() {
     if [ -d "$AMD_VULKAN" ] || [ -d "$ARM_VULKAN" ]; then
         DEST=dist/darwin/lib/ollama/vulkan
         mkdir -p "$DEST"
-        for LIB in libggml-vulkan.dylib libMoltenVK.dylib; do
+        for LIB in libggml-vulkan.so libMoltenVK.dylib; do
             if [ -f "$AMD_VULKAN/$LIB" ] && [ -f "$ARM_VULKAN/$LIB" ]; then
                 if [ "$LIB" = "libMoltenVK.dylib" ]; then
                     cp "$AMD_VULKAN/$LIB" "$DEST/"
@@ -185,6 +185,14 @@ _prepare_darwin_runtime() {
     lipo -create -output dist/darwin/llama-quantize dist/darwin-amd64/lib/ollama/llama-quantize dist/darwin-arm64/lib/ollama/llama-quantize
     chmod +x dist/darwin/llama-quantize
     lipo dist/darwin/llama-quantize -verify_arch x86_64 arm64
+
+    # The universal payload keeps llama-server/llama-quantize in dist/darwin
+    # while their libraries are merged into lib/ollama. The per-arch binaries
+    # only carry an @loader_path rpath, so add one for the merged layout.
+    for BIN in dist/darwin/llama-server dist/darwin/llama-quantize; do
+        install_name_tool -delete_rpath @loader_path/lib/ollama "$BIN" 2>/dev/null || true
+        install_name_tool -add_rpath @loader_path/lib/ollama "$BIN"
+    done
 
     _merge_darwin_payload
 }
